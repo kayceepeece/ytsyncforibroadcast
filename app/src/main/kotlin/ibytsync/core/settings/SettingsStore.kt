@@ -1,6 +1,10 @@
 package ibytsync.core.settings
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import ibytsync.core.pipeline.AudioFormatChoice
@@ -89,6 +93,31 @@ class SettingsStore(context: Context) {    private val masterKey = MasterKey.Bui
                 android.util.Log.e("SettingsStore", "Silent token refresh failed: ${e.message}")
                 false
             }
+        }
+    }
+
+    fun hasSeenBatteryPrompt(): Boolean = prefs.getBoolean("has_seen_battery_prompt", false)
+    fun setHasSeenBatteryPrompt(v: Boolean) { prefs.edit().putBoolean("has_seen_battery_prompt", v).apply() }
+
+    fun isIgnoringBatteryOptimizations(context: Context): Boolean {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
+        return pm.isIgnoringBatteryOptimizations(context.packageName)
+    }
+
+    fun requestIgnoreBatteryOptimizations(context: Context) {
+        try {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:${context.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(fallback)
+            } catch (_: Exception) {}
         }
     }
 

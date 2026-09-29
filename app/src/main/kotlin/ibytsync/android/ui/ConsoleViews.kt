@@ -9,7 +9,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
@@ -25,8 +27,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import ibytsync.android.R
 import ibytsync.android.ui.theme.liquidGlassPanel
+import ibytsync.core.pipeline.AudioFormatChoice
 import ibytsync.core.pipeline.QueueRow
 import ibytsync.core.pipeline.RowStatus
 import ibytsync.core.settings.SettingsStore
@@ -807,19 +811,24 @@ fun SettingsTabContent(
     queuedCount: Int,
     onPickFolderSaf: () -> Unit,
     onStartLogin: () -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
+    onDefaultFormatChange: (AudioFormatChoice) -> Unit = {}
 ) {
     var saveToDisk by remember { mutableStateOf(settings.isLocalSave()) }
+    var defaultAudioFormat by remember { mutableStateOf(settings.getDefaultAudioFormat()) }
     var showDisconnectConfirm by remember { mutableStateOf(false) }
     var clientIdInput by remember { mutableStateOf(settings.getClientId().takeIf { it != SettingsStore.DEFAULT_CLIENT_ID } ?: "") }
     LaunchedEffect(settings) {
         saveToDisk = settings.isLocalSave()
+        defaultAudioFormat = settings.getDefaultAudioFormat()
     }
 
     Column(
         Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Column(
@@ -947,6 +956,70 @@ fun SettingsTabContent(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "AUDIO FORMAT",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFAAAAAA),
+                    letterSpacing = 1.sp
+                )
+                Spacer(Modifier.weight(1f))
+                StatusPill(
+                    label = defaultAudioFormat.label,
+                    color = Color(0xFF1DB954),
+                    active = true
+                )
+            }
+            Text(
+                "Format used for downloads. OPUS and M4A download fastest and use less battery. MP3 works on almost any player.",
+                fontSize = 12.sp,
+                color = Color(0xFF888888)
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                for (fmt in AudioFormatChoice.values()) {
+                    val isSel = defaultAudioFormat == fmt
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isSel) Color(0x2E1DB954) else Color(0x1AFFFFFF))
+                            .border(
+                                width = if (isSel) 1.5.dp else 1.dp,
+                                color = if (isSel) Color(0xFF1DB954) else Color(0x22FFFFFF),
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                            .clickable {
+                                defaultAudioFormat = fmt
+                                settings.setDefaultAudioFormat(fmt)
+                                onDefaultFormatChange(fmt)
+                            }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            fmt.label,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSel) Color(0xFF1DB954) else Color(0xFFCCCCCC)
+                        )
+                    }
+                }
+            }
+        }
+
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .liquidGlassPanel(cornerRadius = 12.dp)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Text(
                 "OFFLINE SONGS",
                 fontSize = 11.sp,
@@ -979,6 +1052,66 @@ fun SettingsTabContent(
                     modifier = Modifier.fillMaxWidth().height(40.dp)
                 ) {
                     Text("CHOOSE FOLDER", fontSize = 12.sp, color = Color(0xFF1DB954))
+                }
+            }
+        }
+
+        val context = LocalContext.current
+        var isIgnoringBattery by remember { mutableStateOf(settings.isIgnoringBatteryOptimizations(context)) }
+
+        LaunchedEffect(Unit) {
+            isIgnoringBattery = settings.isIgnoringBatteryOptimizations(context)
+        }
+
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .liquidGlassPanel(cornerRadius = 12.dp)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "BACKGROUND RELIABILITY",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFAAAAAA),
+                    letterSpacing = 1.sp
+                )
+                Spacer(Modifier.weight(1f))
+                StatusPill(
+                    label = if (isIgnoringBattery) "UNRESTRICTED" else "OPTIMIZED",
+                    color = if (isIgnoringBattery) Color(0xFF1DB954) else Color(0xFFFFB300),
+                    active = isIgnoringBattery
+                )
+            }
+            if (isIgnoringBattery) {
+                Text(
+                    "Battery optimization is disabled. Downloads and tag fetching will run reliably in the background and when the screen is off.",
+                    fontSize = 12.sp,
+                    color = Color(0xFFEEEEEE)
+                )
+            } else {
+                Text(
+                    "Battery saver or system optimization may pause downloads and tag matching when you switch apps or turn off your screen.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF888888)
+                )
+                Button(
+                    onClick = {
+                        settings.requestIgnoreBatteryOptimizations(context)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF222222)),
+                    modifier = Modifier.fillMaxWidth().height(40.dp)
+                ) {
+                    Text(
+                        "ALLOW UNRESTRICTED BACKGROUND",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF1DB954),
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }

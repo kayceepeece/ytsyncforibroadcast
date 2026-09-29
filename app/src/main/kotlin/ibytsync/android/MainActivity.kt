@@ -14,6 +14,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import coil.Coil
+import coil.ImageLoader
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -80,6 +84,14 @@ class MainActivity : ComponentActivity() {
     private var activeBatchService: BatchService? = null
     private var batchServiceConnection: ServiceConnection? = null
 
+    private var triggerBatteryPrompt by mutableStateOf(false)
+
+    private fun checkBatteryPrompt() {
+        if (::settingsStore.isInitialized && !settingsStore.hasSeenBatteryPrompt() && !settingsStore.isIgnoringBatteryOptimizations(this)) {
+            triggerBatteryPrompt = true
+        }
+    }
+
     private val loginViewModel: LoginViewModel by viewModels {
         object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -100,6 +112,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val imageLoader = ImageLoader.Builder(this)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.10)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(25L * 1024 * 1024)
+                    .build()
+            }
+            .okHttpClient { ibytsync.core.network.SharedHttpClient.instance }
+            .crossfade(true)
+            .build()
+        Coil.setImageLoader(imageLoader)
 
         settingsStore = SettingsStore(this)
         ytEngine = YtDlpAndroidImpl(this)
@@ -275,6 +304,28 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Keep BatchService running in foreground during metadata resolution to prevent CPU sleep & App Freezer
+        LaunchedEffect(queueRows) {
+            val hasFetching = queueRows.any { it.status == RowStatus.FETCHING_METADATA }
+            if (hasFetching && !viewModel.isBatchRunning.value) {
+                try {
+                    val serviceIntent = Intent(this@MainActivity, BatchService::class.java).apply {
+                        action = BatchService.ACTION_FETCH_TAGS
+                    }
+                    startForegroundService(serviceIntent)
+                } catch (e: Exception) {
+                    Log.w("MainActivity", "Failed starting BatchService for tags: ${e.message}")
+                }
+            } else if (!hasFetching && !viewModel.isBatchRunning.value && activeBatchService?.isRunning() != true) {
+                try {
+                    val stopIntent = Intent(this@MainActivity, BatchService::class.java).apply {
+                        action = BatchService.ACTION_FINISH_FETCH_TAGS
+                    }
+                    startService(stopIntent)
+                } catch (_: Exception) {}
+            }
+        }
+
         // Re-bind to a running BatchService after rotation; adopt live rows + running state
         DisposableEffect(Unit) {
             val probe = Intent(this@MainActivity, BatchService::class.java)
@@ -336,6 +387,7 @@ class MainActivity : ComponentActivity() {
             contract = ActivityResultContracts.GetContent()
         ) { uri: Uri? ->
             if (uri != null) {
+                checkBatteryPrompt()
                 coroutineScope.launch(Dispatchers.IO) {
                     try {
                         val tempFile = File.createTempFile("picked_audio_", ".mp3", cacheDir)
@@ -380,6 +432,7 @@ class MainActivity : ComponentActivity() {
 
         fun startBatchExecution() {
             if (viewModel.isBatchRunning.value || activeBatchService?.isRunning() == true || !isDownloaderReady) return
+            checkBatteryPrompt()
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
             coroutineScope.launch(Dispatchers.IO) {
                 try {
@@ -503,8 +556,14 @@ class MainActivity : ComponentActivity() {
                         NavTab.QUEUE -> QueueTabContent(
                             rows = queueRows,
                             isBatchRunning = isBatchRunning,
-                            onAddInput = { input -> viewModel.addInput(input) },
-                            onPickLocalFile = { audioPickerLauncher.launch("audio/*") },
+                            onAddInput = { input ->
+                                checkBatteryPrompt()
+                                viewModel.addInput(input)
+                            },
+                            onPickLocalFile = {
+                                checkBatteryPrompt()
+                                audioPickerLauncher.launch("audio/*")
+                            },
                             onOpenInspector = { row -> selectedInspectorRow = row },
                             onRetry = { row -> viewModel.retryRow(row.id) },
                             onRemove = { row ->
@@ -551,6 +610,18 @@ class MainActivity : ComponentActivity() {
                             },
                             onStartLogin = {
                                 login.start()
+                            },
+                            onDefaultFormatChange = { fmt ->
+                                if (batchDestination.format != null) {
+                                    viewModel.setBatchDestination(
+                                        batchDestination.playlistId,
+                                        batchDestination.playlistName,
+                                        fmt,
+                                        batchDestination.skipDuplicates ?: settingsStore.isSkipDuplicates(),
+                                        batchDestination.playlistIds,
+                                        batchDestination.playlistNames
+                                    )
+                                }
                             }
                         )
                     }
@@ -641,6 +712,7 @@ class MainActivity : ComponentActivity() {
                         viewModel.searchYouTube(newQuery)
                     },
                     onAddCandidate = { candidate ->
+                        checkBatteryPrompt()
                         viewModel.addSearchCandidate(candidate)
                     },
                     onDismiss = {
@@ -783,7 +855,10 @@ class MainActivity : ComponentActivity() {
                     },
                     confirmButton = {
                         Button(
-                            onClick = { viewModel.acceptPlaylistPrompt(importEntirePlaylist = true) },
+                            onClick = {
+                                checkBatteryPrompt()
+                                viewModel.acceptPlaylistPrompt(importEntirePlaylist = true)
+                            },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DB954)),
                             shape = RoundedCornerShape(6.dp)
                         ) {
@@ -792,10 +867,62 @@ class MainActivity : ComponentActivity() {
                     },
                     dismissButton = {
                         OutlinedButton(
-                            onClick = { viewModel.acceptPlaylistPrompt(importEntirePlaylist = false) },
+                            onClick = {
+                                checkBatteryPrompt()
+                                viewModel.acceptPlaylistPrompt(importEntirePlaylist = false)
+                            },
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text("SINGLE VIDEO", fontSize = 11.sp, color = Color(0xFFCCCCCC))
+                        }
+                    }
+                )
+            }
+
+            if (triggerBatteryPrompt) {
+                AlertDialog(
+                    onDismissRequest = {
+                        settingsStore.setHasSeenBatteryPrompt(true)
+                        triggerBatteryPrompt = false
+                    },
+                    containerColor = Color(0xFF1E1E1E),
+                    title = {
+                        Text(
+                            "ENABLE BACKGROUND WORK",
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1DB954)
+                        )
+                    },
+                    text = {
+                        Text(
+                            "YT Sync downloads music and fetches tags in the background. To prevent Android from pausing downloads or tag matching when you switch apps or turn off your screen, allow unrestricted background execution.",
+                            fontSize = 12.sp,
+                            color = Color(0xFFEEEEEE)
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                settingsStore.setHasSeenBatteryPrompt(true)
+                                triggerBatteryPrompt = false
+                                settingsStore.requestIgnoreBatteryOptimizations(this@MainActivity)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1DB954)),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text("ALLOW UNRESTRICTED", fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                settingsStore.setHasSeenBatteryPrompt(true)
+                                triggerBatteryPrompt = false
+                            }
+                        ) {
+                            Text("NOT NOW", fontSize = 11.sp, color = Color(0xFF888888))
                         }
                     }
                 )
@@ -818,6 +945,7 @@ class MainActivity : ComponentActivity() {
         if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             val text = intent.getStringExtra(Intent.EXTRA_TEXT)
             if (!text.isNullOrBlank()) {
+                checkBatteryPrompt()
                 viewModel.addInput(text)
             }
         }
@@ -827,6 +955,7 @@ class MainActivity : ComponentActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val url = intent?.getStringExtra("url")
             if (!url.isNullOrBlank()) {
+                checkBatteryPrompt()
                 viewModel.addInput(url)
             }
         }
