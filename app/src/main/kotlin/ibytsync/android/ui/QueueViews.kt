@@ -57,6 +57,7 @@ fun QueueTabContent(
 ) {
     var textInput by remember { mutableStateOf("") }
     val clipboardManager = LocalClipboardManager.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val intent = remember(textInput) { ibytsync.core.input.OmnibarClassifier.classify(textInput) }
 
     LaunchedEffect(Unit) {
@@ -263,15 +264,21 @@ fun QueueTabContent(
                         Button(
                             onClick = {
                                 val clip = clipboardManager.getText()?.text?.trim()
-                                if (!clip.isNullOrEmpty()) {
-                                    onAddInput(clip)
+                                if (clip.isNullOrBlank()) {
+                                    android.widget.Toast.makeText(context, "Clipboard is empty", android.widget.Toast.LENGTH_SHORT).show()
+                                } else {
+                                    when (val parsed = ibytsync.core.input.OmnibarClassifier.classify(clip)) {
+                                        is ibytsync.core.input.OmnibarIntent.SearchQuery -> {
+                                            textInput = clip
+                                            onTriggerSearch(clip)
+                                        }
+                                        else -> onAddInput(clip)
+                                    }
                                 }
                             },
-                            enabled = !clipboardManager.getText()?.text.isNullOrBlank(),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF1DB954),
-                                disabledContainerColor = Color(0xFF262626),
-                                disabledContentColor = Color(0xFF666666)
+                                contentColor = Color.Black
                             ),
                             shape = RoundedCornerShape(6.dp),
                             modifier = Modifier.height(40.dp)
@@ -424,7 +431,11 @@ fun QueueTrackCard(
                         maxLines = 1
                     )
                     Text(
-                        if (row.artist.isNotBlank()) "${row.artist} • ${row.detail}" else row.detail,
+                        when {
+                            row.artist.isNotBlank() && row.detail.isNotBlank() -> "${row.artist} • ${row.detail}"
+                            row.artist.isNotBlank() -> row.artist
+                            else -> row.detail
+                        },
                         fontSize = 11.sp,
                         color = Color(0xFF888888),
                         maxLines = 1
@@ -518,6 +529,7 @@ fun ArtworkThumbnail(
             AsyncImage(
                 model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
                     .data(url)
+                    .size(128)
                     .crossfade(true)
                     .build(),
                 contentDescription = "Cover Art",
