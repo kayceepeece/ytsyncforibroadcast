@@ -59,7 +59,7 @@ data class Tokens(
 )
 
 object IBroadcastOAuth {
-    private val client = OkHttpClient.Builder()
+    private val client = ibytsync.core.network.SharedHttpClient.instance.newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
         .callTimeout(120, TimeUnit.SECONDS)
@@ -277,7 +277,7 @@ object IBroadcastOAuth {
                 .build()
         }
         val t = uploadTimeoutSec(file.length())
-        val longClient = OkHttpClient.Builder()
+        val longClient = client.newBuilder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(t, TimeUnit.SECONDS)
             .readTimeout(t, TimeUnit.SECONDS)

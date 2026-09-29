@@ -52,7 +52,7 @@ class SpotifyEmbedScraper(
         private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
         fun defaultFetcher(client: OkHttpClient? = null): SpotifyEmbedFetcher {
-            val http = client ?: OkHttpClient.Builder()
+            val http = client ?: ibytsync.core.network.SharedHttpClient.instance.newBuilder()
                 .connectTimeout(TIMEOUT_SEC, TimeUnit.SECONDS)
                 .readTimeout(TIMEOUT_SEC, TimeUnit.SECONDS)
                 .callTimeout(TIMEOUT_SEC, TimeUnit.SECONDS)

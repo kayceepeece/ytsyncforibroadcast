@@ -38,7 +38,7 @@ import java.util.concurrent.TimeUnit
 open class YouTubeMusicSearch(
     client: OkHttpClient? = null
 ) {
-    private val http: OkHttpClient = client ?: OkHttpClient.Builder()
+    private val http: OkHttpClient = client ?: ibytsync.core.network.SharedHttpClient.instance.newBuilder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .callTimeout(8, TimeUnit.SECONDS)

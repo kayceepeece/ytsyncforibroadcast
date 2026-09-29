@@ -257,7 +257,7 @@ class ITunesCorrection(
         }
 
         fun okHttpFetcher(client: OkHttpClient? = null): CorrectionFetcher {
-            val http = client ?: OkHttpClient.Builder()
+            val http = client ?: ibytsync.core.network.SharedHttpClient.instance.newBuilder()
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(10, TimeUnit.SECONDS)
                 .callTimeout(15, TimeUnit.SECONDS)

@@ -98,7 +98,7 @@ class SpotifyScraper(
 
         /** Default network fetcher: crawler UA, 10s connect/read/call timeout, null on any failure. */
         fun okHttpFetcher(client: OkHttpClient? = null): SpotifyPageFetcher {
-            val http = client ?: OkHttpClient.Builder()
+            val http = client ?: ibytsync.core.network.SharedHttpClient.instance.newBuilder()
                 .connectTimeout(TIMEOUT_SEC, TimeUnit.SECONDS)
                 .readTimeout(TIMEOUT_SEC, TimeUnit.SECONDS)
                 .callTimeout(TIMEOUT_SEC, TimeUnit.SECONDS)

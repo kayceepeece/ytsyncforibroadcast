@@ -11,7 +11,7 @@ object CoverFetcher {
         0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
     )
 
-    private val client = OkHttpClient.Builder()
+    private val client = ibytsync.core.network.SharedHttpClient.instance.newBuilder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS)

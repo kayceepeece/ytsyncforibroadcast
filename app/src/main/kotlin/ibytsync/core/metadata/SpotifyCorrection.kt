@@ -352,7 +352,7 @@ class SpotifyCorrection(
         fun okHttpFetcher(client: OkHttpClient? = null): SpotifyCorrectionFetcher = defaultFetcher(client)
 
         fun defaultFetcher(client: OkHttpClient? = null): SpotifyCorrectionFetcher {
-            val http = client ?: OkHttpClient.Builder()
+            val http = client ?: ibytsync.core.network.SharedHttpClient.instance.newBuilder()
                 .connectTimeout(TIMEOUT_SEC, TimeUnit.SECONDS)
                 .readTimeout(TIMEOUT_SEC, TimeUnit.SECONDS)
                 .callTimeout(CALL_TIMEOUT_SEC, TimeUnit.SECONDS)
