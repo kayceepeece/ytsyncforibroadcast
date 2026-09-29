@@ -6,6 +6,7 @@ import ibytsync.core.metadata.SpotifyTrackMetadata
 import ibytsync.core.metadata.LocalMetadata
 import ibytsync.core.metadata.UrlKind
 import ibytsync.core.metadata.YtSuggestion
+import java.util.Locale
 
 /**
  * Queue row-state machine for the metadata phase.
@@ -431,6 +432,71 @@ object ProgressPhases {
     const val UPLOAD_END = 0.95f
     const val FINALIZE_HOLD = 0.95f
     const val DONE = 1.0f
+
+    private val PAT_TOTAL = Regex("""of\s+(~)?\s*([\d.]+)\s*([kKmMgGtT]i?B)""")
+    private val PAT_DOWNLOADED = Regex("""\[download\]\s+([\d.]+)\s*([kKmMgGtT]i?B)\s+at""")
+
+    private fun parseUnitToMb(value: Double, unit: String): Double {
+        val u = unit.uppercase(Locale.US)
+        return when {
+            u.contains("G") -> value * 1024.0
+            u.contains("M") -> value
+            u.contains("K") -> value / 1024.0
+            else -> value / (1024.0 * 1024.0)
+        }
+    }
+
+    fun formatDownloadDetail(progressPercent: Float, line: String? = null, durationMs: Long? = null): String {
+        val pctInt = Math.round(progressPercent).toInt().coerceIn(0, 100)
+        if (!line.isNullOrBlank()) {
+            val totalMatch = PAT_TOTAL.find(line)
+            if (totalMatch != null) {
+                val isApprox = totalMatch.groupValues[1] == "~"
+                val valNum = totalMatch.groupValues[2].toDoubleOrNull()
+                val unit = totalMatch.groupValues[3]
+                if (valNum != null) {
+                    val totalMb = parseUnitToMb(valNum, unit)
+                    val dlMb = totalMb * (progressPercent.toDouble().coerceIn(0.0, 100.0) / 100.0)
+                    val approxSym = if (isApprox) "~" else ""
+                    return String.format(Locale.US, "%.1f / %s%.1f MB (%d%%)", dlMb, approxSym, totalMb, pctInt)
+                }
+            }
+
+            val dlMatch = PAT_DOWNLOADED.find(line)
+            if (dlMatch != null) {
+                val valNum = dlMatch.groupValues[1].toDoubleOrNull()
+                val unit = dlMatch.groupValues[2]
+                if (valNum != null) {
+                    val dlMb = parseUnitToMb(valNum, unit)
+                    if (progressPercent > 0f) {
+                        val totalMb = dlMb / (progressPercent.toDouble() / 100.0)
+                        return String.format(Locale.US, "%.1f / %.1f MB (%d%%)", dlMb, totalMb, pctInt)
+                    } else if (durationMs != null && durationMs > 0L) {
+                        val totalMb = (durationMs / 1000.0) * (160_000.0 / 8.0) / (1024.0 * 1024.0)
+                        return String.format(Locale.US, "%.1f / ~%.1f MB (%d%%)", dlMb, totalMb, pctInt)
+                    } else {
+                        return String.format(Locale.US, "%.1f MB (%d%%)", dlMb, pctInt)
+                    }
+                }
+            }
+        }
+
+        if (durationMs != null && durationMs > 0L) {
+            val totalMb = (durationMs / 1000.0) * (160_000.0 / 8.0) / (1024.0 * 1024.0)
+            val dlMb = totalMb * (progressPercent.toDouble().coerceIn(0.0, 100.0) / 100.0)
+            return String.format(Locale.US, "%.1f / ~%.1f MB (%d%%)", dlMb, totalMb, pctInt)
+        }
+
+        return "$pctInt%"
+    }
+
+    fun formatUploadDetail(sent: Long, total: Long): String {
+        if (total <= 0L) return "0%"
+        val totalMb = total.toDouble() / (1024.0 * 1024.0)
+        val sentMb = (sent.toDouble() / (1024.0 * 1024.0)).coerceAtMost(totalMb)
+        val pct = Math.round((sent.toDouble() / total.toDouble()) * 100.0).toInt().coerceIn(0, 100)
+        return String.format(Locale.US, "%.1f / %.1f MB (%d%%)", sentMb, totalMb, pct)
+    }
 
     fun downloadMapped(ytPct01: Float): Float =
         (DOWNLOAD_START + ytPct01.coerceIn(0f, 1f) * (DOWNLOAD_END - DOWNLOAD_START))

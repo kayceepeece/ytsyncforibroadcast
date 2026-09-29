@@ -126,7 +126,7 @@ class BatchRunner(
             try {
                 rows.forEachIndexed { i, row ->
                     ensureNotCancelled(events, finished, summary)
-                    val cur = row.copy(status = RowStatus.DOWNLOADING, progress = ProgressPhases.DOWNLOAD_START, detail = PhaseDetails.DOWNLOADING)
+                    val cur = row.copy(status = RowStatus.DOWNLOADING, progress = ProgressPhases.DOWNLOAD_START, detail = ProgressPhases.formatDownloadDetail(0f, null, row.durationMs))
                     events.trySend(BatchEvent.RowUpdate(cur))
                     events.trySend(
                         BatchEvent.Progress(

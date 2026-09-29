@@ -137,7 +137,7 @@ class BatchOrchestrator(
         if (row.status == RowStatus.AWAITING_ACCEPT) {
             return row.copy(status = RowStatus.FAILED_METADATA) to summary
         }
-        var cur = row.copy(status = RowStatus.DOWNLOADING, progress = ProgressPhases.DOWNLOAD_START, detail = PhaseDetails.DOWNLOADING)
+        var cur = row.copy(status = RowStatus.DOWNLOADING, progress = ProgressPhases.DOWNLOAD_START, detail = ProgressPhases.formatDownloadDetail(0f, null, row.durationMs))
         onRowUpdate?.invoke(cur)
         val progressThrottle = ProgressThrottle { updated -> cur = updated; onRowUpdate?.invoke(cur) }
         fun emitProgress(status: RowStatus, progress: Float, detail: String, force: Boolean = false) {
@@ -145,8 +145,9 @@ class BatchOrchestrator(
             val next = if (force) progress else maxOf(progress, floor)
             progressThrottle.emit(cur, status, next, detail, force)
         }
-        fun downloadTick(progressPercent: Float) {
-            emitProgress(RowStatus.DOWNLOADING, ProgressPhases.downloadMapped(progressPercent / 100f), PhaseDetails.DOWNLOADING)
+        fun downloadTick(progressPercent: Float, line: String? = null) {
+            val detail = ProgressPhases.formatDownloadDetail(progressPercent, line, row.durationMs)
+            emitProgress(RowStatus.DOWNLOADING, ProgressPhases.downloadMapped(progressPercent / 100f), detail)
         }
         var tmp: File? = null
         var activeDownloadToken: String? = null
@@ -193,8 +194,8 @@ class BatchOrchestrator(
                     val token = "tb_" + UUID.randomUUID().toString().take(8)
                     activeDownloadToken = token
                     val req = DownloadRequest(directUrl, token, audioQuality = audioQuality, audioFormat = audioFormat)
-                    val dl = downloader.download(req) { progressPercent, _, _ ->
-                        downloadTick(progressPercent)
+                    val dl = downloader.download(req) { progressPercent, _, line ->
+                        downloadTick(progressPercent, line)
                     } ?: return cur.copy(status = RowStatus.FAILED_DOWNLOAD, detail = PhaseDetails.DOWNLOAD_FAILED) to summary
                     val f = File(dl.filePath)
                     if (!f.exists()) return cur.copy(status = RowStatus.FAILED_DOWNLOAD, detail = PhaseDetails.DOWNLOAD_FAILED) to summary
@@ -225,8 +226,8 @@ class BatchOrchestrator(
                     val token = "tb_" + UUID.randomUUID().toString().take(8)
                     activeDownloadToken = token
                     val req = DownloadRequest(targetUrl, token, audioQuality = audioQuality, audioFormat = audioFormat)
-                    val dl = downloader.download(req) { progressPercent, _, _ ->
-                        downloadTick(progressPercent)
+                    val dl = downloader.download(req) { progressPercent, _, line ->
+                        downloadTick(progressPercent, line)
                     } ?: return cur.copy(status = RowStatus.FAILED_DOWNLOAD, detail = PhaseDetails.DOWNLOAD_FAILED) to summary
                     val f = File(dl.filePath)
                     if (!f.exists()) return cur.copy(status = RowStatus.FAILED_DOWNLOAD, detail = PhaseDetails.DOWNLOAD_FAILED) to summary
@@ -307,10 +308,10 @@ class BatchOrchestrator(
                 }
                 else -> listOfNotNull(UploadRouter.resolve(cfg.routePreference, hooks.playlists(), cfg.askedPlaylistId))
             }
-            emitProgress(RowStatus.UPLOADING, uploadFloor, PhaseDetails.UPLOADING, force = true)
+            emitProgress(RowStatus.UPLOADING, uploadFloor, ProgressPhases.formatUploadDetail(0L, tmp.length()), force = true)
             val uploadOutcome = try {
                 hooks.uploadFileWithResult(tmp, playlistIds, md5) { sent, total ->
-                    emitProgress(RowStatus.UPLOADING, ProgressPhases.uploadMapped(sent, total, uploadFloor), PhaseDetails.UPLOADING)
+                    emitProgress(RowStatus.UPLOADING, ProgressPhases.uploadMapped(sent, total, uploadFloor), ProgressPhases.formatUploadDetail(sent, total))
                 }
             } catch (_: Exception) { UploadOutcome(false) }
             tmp.delete()
