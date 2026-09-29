@@ -108,7 +108,11 @@ fun SyncedTrackInspectorSheet(
                 ) {
                     if (!track.coverUrl.isNullOrBlank()) {
                         AsyncImage(
-                            model = track.coverUrl,
+                            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                .data(track.coverUrl)
+                                .size(256)
+                                .crossfade(true)
+                                .build(),
                             contentDescription = "Track Artwork",
                             modifier = Modifier
                                 .size(90.dp)

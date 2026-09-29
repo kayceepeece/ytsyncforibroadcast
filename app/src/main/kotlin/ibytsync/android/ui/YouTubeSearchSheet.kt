@@ -287,7 +287,11 @@ private fun CandidateItemRow(
                 .background(Color(0xFF2A2A2A))
         ) {
             AsyncImage(
-                model = "https://i.ytimg.com/vi/${candidate.id}/hqdefault.jpg",
+                model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                    .data("https://i.ytimg.com/vi/${candidate.id}/hqdefault.jpg")
+                    .size(160, 90)
+                    .crossfade(true)
+                    .build(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.matchParentSize()

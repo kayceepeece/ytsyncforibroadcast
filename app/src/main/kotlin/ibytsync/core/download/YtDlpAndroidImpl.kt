@@ -11,7 +11,24 @@ class YtDlpAndroidImpl(private val context: Context) : YtDlpEngine {
 
     private var isInitialized = false
 
+    fun pruneOrphanedTempFiles(maxAgeMs: Long = 24 * 60 * 60 * 1000L) {
+        try {
+            val outDir = context.getExternalFilesDir("youtubedl-android") ?: File(context.filesDir, "youtubedl-android")
+            if (!outDir.exists() || !outDir.isDirectory) return
+            val cutoff = System.currentTimeMillis() - maxAgeMs
+            outDir.listFiles()?.forEach { file ->
+                if (file.isFile && file.lastModified() < cutoff) {
+                    val name = file.name
+                    if (name.endsWith(".part") || name.endsWith(".ytdl") || name.startsWith("tb_")) {
+                        file.delete()
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     fun init(): Boolean {
+        pruneOrphanedTempFiles()
         if (isInitialized) return true
         return try {
             YoutubeDL.getInstance().init(context)
@@ -84,36 +101,45 @@ class YtDlpAndroidImpl(private val context: Context) : YtDlpEngine {
         val outDir = context.getExternalFilesDir("youtubedl-android") ?: File(context.filesDir, "youtubedl-android")
         outDir.mkdirs()
         val playerClients = listOf("ios", "android", "web")
-        for (client in playerClients) {
-            try {
-                val req = YoutubeDLRequest(request.queryOrUrl)
-                req.addOption("--no-playlist")
-                req.addOption("--no-check-certificate")
-                req.addOption("--socket-timeout", "20")
-                req.addOption("--retries", "2")
-                req.addOption("--extractor-args", "youtube:player_client=$client")
-                req.addOption("-x")
-                req.addOption("--audio-format", request.audioFormat)
-                req.addOption("--audio-quality", request.audioQuality)
-                req.addOption("-o", File(outDir, "${request.tokenPrefix}_%(title)s.%(ext)s").absolutePath)
-                val resp = if (onProgress != null) {
-                    YoutubeDL.getInstance().execute(req, request.tokenPrefix) { progress, eta, line ->
-                        onProgress(progress, eta, line)
+        try {
+            for (client in playerClients) {
+                try {
+                    val req = YoutubeDLRequest(request.queryOrUrl)
+                    req.addOption("--no-playlist")
+                    req.addOption("--no-check-certificate")
+                    req.addOption("--socket-timeout", "20")
+                    req.addOption("--retries", "2")
+                    req.addOption("--extractor-args", "youtube:player_client=$client")
+                    req.addOption("-x")
+                    req.addOption("--audio-format", request.audioFormat)
+                    req.addOption("--audio-quality", request.audioQuality)
+                    req.addOption("-o", File(outDir, "${request.tokenPrefix}_%(title)s.%(ext)s").absolutePath)
+                    val resp = if (onProgress != null) {
+                        YoutubeDL.getInstance().execute(req, request.tokenPrefix) { progress, eta, line ->
+                            onProgress(progress, eta, line)
+                        }
+                    } else {
+                        YoutubeDL.getInstance().execute(req, request.tokenPrefix, null)
                     }
-                } else {
-                    YoutubeDL.getInstance().execute(req, request.tokenPrefix, null)
+                    variantLog.add("client=$client rc=${resp.exitCode}")
+                    val produced = outDir.listFiles { f ->
+                        f.name.startsWith(request.tokenPrefix) && !f.name.endsWith(".part") && !f.name.endsWith(".ytdl")
+                    }?.sortedBy { it.name }?.firstOrNull()
+                    if (resp.exitCode == 0 && produced != null) {
+                        return DownloadResult(produced.absolutePath, "player_client=$client", resp.exitCode)
+                    }
+                } catch (e: Exception) {
+                    variantLog.add("client=$client ex=${e.javaClass.simpleName}:${e.message?.take(800)}")
                 }
-                variantLog.add("client=$client rc=${resp.exitCode}")
-                val produced = outDir.listFiles { f -> f.name.startsWith(request.tokenPrefix) }
-                    ?.sortedBy { it.name }?.firstOrNull()
-                if (resp.exitCode == 0 && produced != null) {
-                    return DownloadResult(produced.absolutePath, "player_client=$client", resp.exitCode)
-                }
-            } catch (e: Exception) {
-                variantLog.add("client=$client ex=${e.javaClass.simpleName}:${e.message?.take(800)}")
             }
+            return null
+        } finally {
+            try {
+                outDir.listFiles { f ->
+                    f.name.startsWith(request.tokenPrefix) && (f.name.endsWith(".part") || f.name.endsWith(".ytdl"))
+                }?.forEach { it.delete() }
+            } catch (_: Exception) {}
         }
-        return null
     }
 
     override fun describeVideo(url: String): ibytsync.core.metadata.YtExtract? {

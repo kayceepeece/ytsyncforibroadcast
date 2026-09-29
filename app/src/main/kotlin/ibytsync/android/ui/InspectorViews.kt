@@ -328,7 +328,11 @@ fun ReleasePickerSheet(
                                 }
                             } else if (!previewOpt.artworkUrl.isNullOrBlank()) {
                                 AsyncImage(
-                                    model = previewOpt.artworkUrl,
+                                    model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                        .data(previewOpt.artworkUrl)
+                                        .size(240)
+                                        .crossfade(true)
+                                        .build(),
                                     contentDescription = "Cover Art Preview",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
@@ -633,7 +637,11 @@ fun ReleasePickerSheet(
                                     }
                                 } else if (!opt.artworkUrl.isNullOrBlank()) {
                                     AsyncImage(
-                                        model = opt.artworkUrl,
+                                        model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                            .data(opt.artworkUrl)
+                                            .size(128)
+                                            .crossfade(true)
+                                            .build(),
                                         contentDescription = "Cover",
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()

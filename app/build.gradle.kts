@@ -18,6 +18,10 @@ android {
         versionName = "0.1.1"
     }
 
+    base {
+        archivesName.set("ytsync-for-ibroadcast")
+    }
+
     splits {
         abi {
             isEnable = true
