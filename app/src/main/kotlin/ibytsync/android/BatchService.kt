@@ -327,7 +327,7 @@ class BatchService : Service() {
                     )
                 }
                 is BatchEvent.Finished -> {
-                    persistFinishedBatch()
+                    persistFinishedBatch(event.completedRows)
                     updateNotification(1, 1, event.summary.message())
                     releaseLocks()
                     stopForeground(STOP_FOREGROUND_REMOVE)
@@ -349,10 +349,12 @@ class BatchService : Service() {
         }
     }
 
-    private fun persistFinishedBatch() {
+    private fun persistFinishedBatch(completedRows: List<QueueRow> = emptyList()) {
         try {
-            val finished = latest.filter {
-                it.status == RowStatus.DONE || it.status == RowStatus.ALREADY_UPLOADED
+            val finished = completedRows.ifEmpty {
+                latest.filter {
+                    it.status == RowStatus.DONE || it.status == RowStatus.ALREADY_UPLOADED
+                }
             }
             if (finished.isNotEmpty()) {
                 val existing = DiskStore.loadSynced(this)
@@ -369,9 +371,8 @@ class BatchService : Service() {
                 DiskStore.saveSynced(this, filtered + ordered)
 
                 // Remove finished items from queue
-                val remaining = latest.filterNot {
-                    it.status == RowStatus.DONE || it.status == RowStatus.ALREADY_UPLOADED
-                }
+                val finishedIds = finished.map { it.id }.toSet()
+                val remaining = latest.filterNot { it.id in finishedIds }
                 DiskStore.saveQueue(this, remaining)
                 latest = remaining
             }

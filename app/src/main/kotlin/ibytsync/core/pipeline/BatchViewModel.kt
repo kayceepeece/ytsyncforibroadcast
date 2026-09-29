@@ -108,7 +108,23 @@ class BatchViewModel(
     }
 
     fun setSyncedRows(rows: List<QueueRow>) {
-        _syncedRows.value = rows
+        val activeReplaces = _rows.value.mapNotNull { it.replacesUploadedTrackId }.toSet()
+        _syncedRows.value = rows.map {
+            if (it.isEditingInStudio && (it.ibroadcastTrackId !in activeReplaces && it.id !in activeReplaces)) {
+                it.copy(isEditingInStudio = false)
+            } else it
+        }
+    }
+
+    fun reconcileEditingStatus() {
+        val activeReplaces = _rows.value.mapNotNull { it.replacesUploadedTrackId }.toSet()
+        _syncedRows.update { list ->
+            list.map {
+                if (it.isEditingInStudio && (it.ibroadcastTrackId !in activeReplaces && it.id !in activeReplaces)) {
+                    it.copy(isEditingInStudio = false)
+                } else it
+            }
+        }
     }
 
     fun addSyncedRows(rows: List<QueueRow>) {
@@ -937,6 +953,7 @@ class BatchViewModel(
 
     fun clearFinished() {
         _rows.update { list -> list.filterNot { RowStates.isTerminal(it.status) } }
+        reconcileEditingStatus()
     }
 
     fun clearAll() {

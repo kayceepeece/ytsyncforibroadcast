@@ -34,7 +34,10 @@ data class BatchProgress(
 sealed interface BatchEvent {
     data class RowUpdate(val row: QueueRow) : BatchEvent
     data class Progress(val progress: BatchProgress) : BatchEvent
-    data class Finished(val summary: ibytsync.core.upload.BatchSummary) : BatchEvent
+    data class Finished(
+        val summary: ibytsync.core.upload.BatchSummary,
+        val completedRows: List<QueueRow> = emptyList()
+    ) : BatchEvent
     data class Cancelled(val completedRows: List<QueueRow>) : BatchEvent
 }
 
@@ -149,7 +152,7 @@ class BatchRunner(
                         )
                     )
                 }
-                terminal = BatchEvent.Finished(summary)
+                terminal = BatchEvent.Finished(summary, finished.toList())
             } catch (e: CancellationException) {
                 val marked = finished.toList() +
                     rows.drop(finished.size).map { it.copy(status = RowStatus.CANCELLED_UPLOAD, detail = PhaseDetails.CANCELLED) }

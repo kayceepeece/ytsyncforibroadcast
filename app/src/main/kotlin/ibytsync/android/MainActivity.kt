@@ -166,32 +166,12 @@ class MainActivity : ComponentActivity() {
                         pipelineHooks.updateLibraryCache(cached)
                         viewModel.refreshDuplicateMatches()
                     }
-                    val token = settingsStore.getAccessToken()
-                    val status = IBroadcastOAuth.fetchStatus(token)
-                    if (status != null) settingsStore.setAccountId(status.accountId)
-                    val unchanged = status?.lastModified != null &&
-                        status.lastModified == cached?.lastModified
-                    if (unchanged) {
-                        Log.i("MainActivity", "Library unchanged since last fetch; skipping.")
-                    } else {
-                        Log.i("MainActivity", "Fetching iBroadcast library snapshot...")
-                        val snapshot = IBroadcastOAuth.fetchLibrary(token)
-                        if (snapshot != null) {
-                            Log.i("MainActivity", "Fetched library snapshot: ${snapshot.playlists.size} playlists, ${snapshot.tracks.size} tracks")
-                            pipelineHooks.updateLibraryCache(snapshot)
-                            DiskStore.saveLibrary(this@MainActivity, snapshot)
-                            viewModel.refreshDuplicateMatches()
-                        } else {
-                            Log.w("MainActivity", "Library snapshot returned null")
-                            messages.tryEmit("Couldn't refresh your library")
-                        }
-                    }
+                    syncLibraryFromNetwork(force = false)
                 } else {
                     Log.i("MainActivity", "User is not logged in to iBroadcast.")
                 }
             } catch (e: Exception) {
-                Log.e("MainActivity", "Failed fetching library cache: ${e.message}", e)
-                messages.tryEmit("Couldn't refresh your library")
+                Log.e("MainActivity", "Failed initializing library cache: ${e.message}", e)
             }
         }
 
@@ -279,6 +259,9 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(Unit) {
             val loadedSynced = withContext(Dispatchers.IO) { DiskStore.loadSynced(context) }
             viewModel.setSyncedRows(loadedSynced)
+            withContext(Dispatchers.IO) {
+                DiskStore.saveSynced(context, viewModel.syncedRows.value)
+            }
         }
 
         // Persist queue rows whenever they change (debounced, progress-only writes skipped)
@@ -434,18 +417,6 @@ class MainActivity : ComponentActivity() {
             if (viewModel.isBatchRunning.value || activeBatchService?.isRunning() == true || !isDownloaderReady) return
             checkBatteryPrompt()
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            coroutineScope.launch(Dispatchers.IO) {
-                try {
-                    if (settingsStore.isLoggedIn()) {
-                        val snapshot = IBroadcastOAuth.fetchLibrary(settingsStore.getAccessToken())
-                        if (snapshot != null) {
-                            pipelineHooks.updateLibraryCache(snapshot)
-                            DiskStore.saveLibrary(this@MainActivity, snapshot)
-                        }
-                    }
-                } catch (_: Exception) {}
-                viewModel.refreshDuplicateMatches()
-            }
             viewModel.setBatchRunning(true)
             val intent = Intent(this@MainActivity, BatchService::class.java)
             startForegroundService(intent)
@@ -475,7 +446,7 @@ class MainActivity : ComponentActivity() {
                             }
                             is BatchEvent.Finished -> {
                                 viewModel.setBatchRunning(false)
-                                val finished = batchService.currentRows().filter {
+                                val finished = event.completedRows.filter {
                                     it.status == RowStatus.DONE || it.status == RowStatus.ALREADY_UPLOADED
                                 }
                                 val replacedIds = finished.mapNotNull { it.replacesUploadedTrackId }.toSet()
@@ -492,7 +463,7 @@ class MainActivity : ComponentActivity() {
                                 viewModel.addSyncedRows(ordered)
                                 DiskStore.saveSynced(this@MainActivity, viewModel.syncedRows.value)
                                 // One summary line per batch — never one per failed row.
-                                val failedCount = batchService.currentRows().count {
+                                val failedCount = event.completedRows.count {
                                     it.status == RowStatus.FAILED_UPLOAD || it.status == RowStatus.FAILED_DOWNLOAD ||
                                         it.status == RowStatus.FAILED_SAVE || it.status == RowStatus.FAILED_METADATA
                                 }
@@ -503,13 +474,38 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                                 viewModel.clearFinished()
-                                try { unbindService(this) } catch (_: Exception) {}
+                                activeBatchService = null
+                                batchServiceConnection?.let {
+                                    try { unbindService(it) } catch (_: Exception) {}
+                                    batchServiceConnection = null
+                                }
+                                syncLibraryFromNetwork(force = true)
                             }
                             is BatchEvent.Cancelled -> {
                                 viewModel.setBatchRunning(false)
+                                val doneRows = event.completedRows.filter { it.status == RowStatus.DONE || it.status == RowStatus.ALREADY_UPLOADED }
+                                if (doneRows.isNotEmpty()) {
+                                    val replacedIds = doneRows.mapNotNull { it.replacesUploadedTrackId }.toSet()
+                                    if (replacedIds.isNotEmpty()) {
+                                        viewModel.replaceSyncedRows { current ->
+                                            current.filterNot { it.ibroadcastTrackId in replacedIds || it.id in replacedIds }
+                                        }
+                                    }
+                                    val ordered = doneRows.reversed().map { row ->
+                                        if (row.status == RowStatus.DONE && !row.replacesUploadedTrackId.isNullOrEmpty()) {
+                                            row.copy(replacesUploadedTrackId = null)
+                                        } else row
+                                    }
+                                    viewModel.addSyncedRows(ordered)
+                                    DiskStore.saveSynced(this@MainActivity, viewModel.syncedRows.value)
+                                }
                                 viewModel.upsertRows(event.completedRows)
                                 viewModel.clearFinished()
-                                try { unbindService(this) } catch (_: Exception) {}
+                                activeBatchService = null
+                                batchServiceConnection?.let {
+                                    try { unbindService(it) } catch (_: Exception) {}
+                                    batchServiceConnection = null
+                                }
                             }
                         }
                     }
@@ -969,6 +965,41 @@ class MainActivity : ComponentActivity() {
         } else {
             registerReceiver(testReceiver, filter)
         }
+    }
+
+    private fun syncLibraryFromNetwork(force: Boolean = false) {
+        if (!settingsStore.isLoggedIn()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val token = settingsStore.getAccessToken()
+                val cached = DiskStore.loadLibrary(this@MainActivity)
+                val status = IBroadcastOAuth.fetchStatus(token)
+                if (status != null) settingsStore.setAccountId(status.accountId)
+                val unchanged = !force && status?.lastModified != null &&
+                    status.lastModified == cached?.lastModified
+                if (unchanged) {
+                    Log.i("MainActivity", "Library unchanged since last fetch; skipping.")
+                } else {
+                    Log.i("MainActivity", "Fetching iBroadcast library snapshot...")
+                    val snapshot = IBroadcastOAuth.fetchLibrary(token)
+                    if (snapshot != null) {
+                        Log.i("MainActivity", "Fetched library snapshot: ${snapshot.playlists.size} playlists, ${snapshot.tracks.size} tracks")
+                        pipelineHooks.updateLibraryCache(snapshot)
+                        DiskStore.saveLibrary(this@MainActivity, snapshot)
+                        viewModel.refreshDuplicateMatches()
+                    } else {
+                        Log.w("MainActivity", "Library snapshot returned null")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed refreshing library: ${e.message}", e)
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        syncLibraryFromNetwork(force = false)
     }
 
     override fun onDestroy() {

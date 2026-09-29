@@ -22,6 +22,7 @@ data class LibraryTrackInfo(
 object DuplicateDetector {
     fun normalize(s: String): String {
         return s.lowercase()
+            .replace(Regex("['’`\"]"), "")
             .replace(Regex("\\b(official|audio|video|lyrics|lyric|remastered|remaster|hd|4k|version)\\b", RegexOption.IGNORE_CASE), "")
             .replace(Regex("\\b(feat\\.|ft\\.|featuring)\\s+.*", RegexOption.IGNORE_CASE), "")
             .replace(Regex("[\\(\\)\\[\\]\\-_•/|]"), " ")
@@ -37,29 +38,32 @@ object DuplicateDetector {
     ): ibytsync.core.pipeline.DuplicateMatch? {
         if (title.isBlank()) return null
         val normTitle = normalize(title)
+        if (normTitle.isBlank()) return null
         val normArtist = normalize(artist)
         val durationSec = (durationMs ?: 0L) / 1000L
 
         for (t in libraryTracks) {
             val libNormTitle = normalize(t.title)
+            val titleMatches = normTitle == libNormTitle
+            if (!titleMatches) continue
+
             val libNormArtist = normalize(t.artist)
             val artistMatches = normArtist.isEmpty() || libNormArtist.isEmpty() ||
                     normArtist == libNormArtist || normArtist.contains(libNormArtist) || libNormArtist.contains(normArtist)
 
-            val titleMatches = normTitle == libNormTitle ||
-                    normTitle.contains(libNormTitle) || libNormTitle.contains(normTitle)
+            if (!artistMatches) continue
 
-            if (artistMatches && titleMatches) {
-                val isExact = if (durationSec > 0 && t.lengthSec > 0) {
-                    kotlin.math.abs(durationSec - t.lengthSec) <= 4
-                } else true
+            val durationMatches = if (durationSec > 0 && t.lengthSec > 0) {
+                kotlin.math.abs(durationSec - t.lengthSec) <= 5
+            } else true
 
+            if (durationMatches) {
                 return ibytsync.core.pipeline.DuplicateMatch(
                     isDuplicate = true,
                     matchedTitle = t.title,
                     matchedArtist = t.artist,
                     durationSec = t.lengthSec,
-                    isExactDuration = isExact
+                    isExactDuration = true
                 )
             }
         }
@@ -68,8 +72,15 @@ object DuplicateDetector {
 
     fun isDuplicate(title: String, artist: String, library: Map<String, Pair<String, String>>): Boolean {
         val t = normalize(title)
+        if (t.isBlank()) return false
         val a = normalize(artist)
-        return library.values.any { normalize(it.first) == t && normalize(it.second) == a }
+        return library.values.any {
+            val libNormTitle = normalize(it.first)
+            val libNormArtist = normalize(it.second)
+            val artistMatches = a.isEmpty() || libNormArtist.isEmpty() ||
+                    a == libNormArtist || a.contains(libNormArtist) || libNormArtist.contains(a)
+            libNormTitle == t && artistMatches
+        }
     }
 }
 
