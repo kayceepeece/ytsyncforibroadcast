@@ -591,7 +591,13 @@ class MainActivity : ComponentActivity() {
                                 syncedSortOrder = order
                                 settingsStore.setSyncedSortOrder(if (order == SyncedSortOrder.OLDEST_FIRST) "oldest" else "newest")
                             },
-                            onTrackClick = { inspectedSyncedTrack = it }
+                            onTrackClick = { inspectedSyncedTrack = it },
+                            onDeleteTracks = { idsToDelete ->
+                                viewModel.replaceSyncedRows { current ->
+                                    current.filterNot { it.id in idsToDelete }
+                                }
+                                DiskStore.saveSynced(this@MainActivity, viewModel.syncedRows.value)
+                            }
                         )
                         NavTab.SETTINGS -> SettingsTabContent(
                             settings = settingsStore,
@@ -694,6 +700,13 @@ class MainActivity : ComponentActivity() {
                         DiskStore.saveSynced(this@MainActivity, viewModel.syncedRows.value)
                         activeTab = NavTab.QUEUE
                         selectedInspectorRow = stagedRow
+                    },
+                    onDeleteTrack = { trackToDelete ->
+                        viewModel.replaceSyncedRows { current ->
+                            current.filterNot { it.id == trackToDelete.id }
+                        }
+                        DiskStore.saveSynced(this@MainActivity, viewModel.syncedRows.value)
+                        inspectedSyncedTrack = null
                     }
                 )
             }

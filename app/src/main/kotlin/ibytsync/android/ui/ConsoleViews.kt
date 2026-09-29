@@ -2,16 +2,22 @@ package ibytsync.android.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
@@ -413,10 +419,15 @@ fun SyncedTabContent(
     syncedList: List<QueueRow>,
     sortOrder: SyncedSortOrder = SyncedSortOrder.NEWEST_FIRST,
     onSortOrderChange: (SyncedSortOrder) -> Unit = {},
-    onTrackClick: (QueueRow) -> Unit = {}
+    onTrackClick: (QueueRow) -> Unit = {},
+    onDeleteTracks: (Set<String>) -> Unit = {}
 ) {
     var viewMode by remember { mutableStateOf(SyncedViewMode.ALL_TRACKS) }
     var filterText by remember { mutableStateOf("") }
+    val selectedTrackIds = remember { mutableStateListOf<String>() }
+    val isSelectionMode = selectedTrackIds.isNotEmpty()
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
 
     val sortedList = remember(syncedList, sortOrder) {
         when (sortOrder) {
@@ -439,6 +450,57 @@ fun SyncedTabContent(
         }
     }
 
+    if (showDeleteConfirm) {
+        val count = selectedTrackIds.size
+        val tracksToDelete = remember(selectedTrackIds.toList()) {
+            syncedList.filter { it.id in selectedTrackIds }
+        }
+        ConfirmDialog(
+            title = if (count == 1) "REMOVE 1 TRACK FROM HISTORY?" else "REMOVE $count TRACKS FROM HISTORY?",
+            titleColor = Color(0xFFE91429),
+            message = "This removes ${if (count == 1) "this track" else "these tracks"} from your history on this device. Music in your iBroadcast library is not affected.",
+            confirmLabel = if (count == 1) "DELETE TRACK" else "DELETE $count TRACKS",
+            confirmColor = Color(0xFFE91429),
+            extraContent = if (tracksToDelete.isNotEmpty()) {
+                {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF262626))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        tracksToDelete.take(3).forEach { t ->
+                            Text(
+                                "• ${t.title}${if (t.artist.isNotBlank()) " — ${t.artist}" else ""}",
+                                fontSize = 11.sp,
+                                color = Color(0xFFCCCCCC),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        if (tracksToDelete.size > 3) {
+                            Text(
+                                "+ ${tracksToDelete.size - 3} more",
+                                fontSize = 10.sp,
+                                color = Color(0xFF888888),
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+            } else null,
+            onConfirm = {
+                onDeleteTracks(selectedTrackIds.toSet())
+                selectedTrackIds.clear()
+                showDeleteConfirm = false
+            },
+            onDismiss = { showDeleteConfirm = false }
+        )
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -455,6 +517,78 @@ fun SyncedTabContent(
                 }
             }
         } else {
+            if (isSelectionMode) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF2B1818))
+                        .border(1.dp, Color(0x66E91429), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { selectedTrackIds.clear() },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Cancel selection", tint = Color(0xFFAAAAAA), modifier = Modifier.size(16.dp))
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "${selectedTrackIds.size} SELECTED",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFEEEEEE)
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        TextButton(
+                            onClick = {
+                                if (selectedTrackIds.size == filteredList.size) {
+                                    selectedTrackIds.clear()
+                                } else {
+                                    selectedTrackIds.clear()
+                                    selectedTrackIds.addAll(filteredList.map { it.id })
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                if (selectedTrackIds.size == filteredList.size) "DESELECT ALL" else "SELECT ALL",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1DB954)
+                            )
+                        }
+
+                        Button(
+                            onClick = { showDeleteConfirm = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91429)),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Filled.Delete, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "DELETE",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
             OutlinedTextField(
                 value = filterText,
                 onValueChange = { filterText = it },
@@ -579,7 +713,31 @@ fun SyncedTabContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(filteredList, key = { it.id }) { row ->
-                        SyncedTrackCard(row = row, onClick = { onTrackClick(row) })
+                        SyncedTrackCard(
+                            row = row,
+                            isSelected = row.id in selectedTrackIds,
+                            isSelectionMode = isSelectionMode,
+                            onClick = {
+                                if (isSelectionMode) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    if (row.id in selectedTrackIds) {
+                                        selectedTrackIds.remove(row.id)
+                                    } else {
+                                        selectedTrackIds.add(row.id)
+                                    }
+                                } else {
+                                    onTrackClick(row)
+                                }
+                            },
+                            onLongClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                if (row.id in selectedTrackIds) {
+                                    selectedTrackIds.remove(row.id)
+                                } else {
+                                    selectedTrackIds.add(row.id)
+                                }
+                            }
+                        )
                     }
                 }
             } else {
@@ -722,7 +880,31 @@ fun SyncedTabContent(
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         tracks.forEach { row ->
-                                            SyncedTrackCard(row = row, onClick = { onTrackClick(row) })
+                                            SyncedTrackCard(
+                                                row = row,
+                                                isSelected = row.id in selectedTrackIds,
+                                                isSelectionMode = isSelectionMode,
+                                                onClick = {
+                                                    if (isSelectionMode) {
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        if (row.id in selectedTrackIds) {
+                                                            selectedTrackIds.remove(row.id)
+                                                        } else {
+                                                            selectedTrackIds.add(row.id)
+                                                        }
+                                                    } else {
+                                                        onTrackClick(row)
+                                                    }
+                                                },
+                                                onLongClick = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    if (row.id in selectedTrackIds) {
+                                                        selectedTrackIds.remove(row.id)
+                                                    } else {
+                                                        selectedTrackIds.add(row.id)
+                                                    }
+                                                }
+                                            )
                                         }
                                     }
                                 }
@@ -735,19 +917,56 @@ fun SyncedTabContent(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SyncedTrackCard(row: QueueRow, onClick: () -> Unit) {
+private fun SyncedTrackCard(
+    row: QueueRow,
+    isSelected: Boolean = false,
+    isSelectionMode: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {}
+) {
     val opacity = if (row.isEditingInStudio) 0.55f else 1.0f
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF181818).copy(alpha = opacity))
-            .border(1.dp, Color(0x22FFFFFF).copy(alpha = opacity), RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .then(
+                if (isSelected) {
+                    Modifier
+                        .background(Color(0x33E91429))
+                        .border(1.5.dp, Color(0xFFE91429), RoundedCornerShape(8.dp))
+                } else {
+                    Modifier
+                        .background(Color(0xFF181818).copy(alpha = opacity))
+                        .border(1.dp, Color(0x22FFFFFF).copy(alpha = opacity), RoundedCornerShape(8.dp))
+                }
+            )
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (isSelectionMode) {
+            if (isSelected) {
+                Icon(
+                    Icons.Filled.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = Color(0xFFE91429),
+                    modifier = Modifier.size(20.dp)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .border(1.5.dp, Color(0xFF666666), CircleShape)
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+        }
+
         ArtworkThumbnail(
             url = row.coverUrl,
             source = row.sourceType(),

@@ -18,18 +18,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.Composable
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,9 +41,69 @@ import ibytsync.core.pipeline.QueueRow
 fun SyncedTrackInspectorSheet(
     track: QueueRow,
     onDismiss: () -> Unit,
-    onEditAndReSync: (QueueRow) -> Unit
+    onEditAndReSync: (QueueRow) -> Unit,
+    onDeleteTrack: ((QueueRow) -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            containerColor = Color(0xFF1E1E1E),
+            shape = RoundedCornerShape(12.dp),
+            title = {
+                Text(
+                    "REMOVE 1 TRACK FROM HISTORY?",
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFE91429)
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "This removes this track from your history on this device. Music in your iBroadcast library is not affected.",
+                        fontSize = 12.sp,
+                        color = Color(0xFFCCCCCC)
+                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF262626))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "• ${track.title}${if (track.artist.isNotBlank()) " — ${track.artist}" else ""}",
+                            fontSize = 11.sp,
+                            color = Color(0xFFCCCCCC),
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDeleteTrack?.invoke(track)
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91429)),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text("DELETE TRACK", fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("KEEP", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF888888))
+                }
+            }
+        )
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -88,8 +141,15 @@ fun SyncedTrackInspectorSheet(
                         letterSpacing = 1.sp
                     )
                 }
-                IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color(0xFF888888))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onDeleteTrack != null) {
+                        IconButton(onClick = { showDeleteConfirm = true }, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete from history", tint = Color(0xFFE91429), modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color(0xFF888888))
+                    }
                 }
             }
 
